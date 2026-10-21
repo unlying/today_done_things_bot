@@ -14,7 +14,7 @@ from oauth2client.service_account import ServiceAccountCredentials
 # --- Конфигурация ---
 # Токен и путь к ключу Google теперь берем из переменных окружения Render
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
-CREDS_FILE = "credentials.json" # Имя файла, который вы загрузите в репозиторий
+CREDS_FILE = "/etc/secrets/credentials.json" # Имя файла, который вы загрузите в репозиторий
 SHEET_NAME = "Work Log" # Ваше название таблицы
 # Render автоматически подставит ваш URL, но мы можем задать путь
 WEBHOOK_PATH = "/webhook"
