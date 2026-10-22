@@ -18,7 +18,7 @@ from oauth2client.service_account import ServiceAccountCredentials
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 # Ваш Telegram ID, чтобы бот знал, кому отправлять саммари (узнать можно у @userinfobot)
-YOUR_CHAT_ID = int(os.environ.get("YOUR_CHAT_ID", 0)) 
+YOUR_CHAT_ID = int(os.environ.get("196564651", 0)) 
 CREDS_FILE = "/etc/secrets/credentials.json"
 if not os.path.exists(CREDS_FILE):
     CREDS_FILE = "credentials.json"
