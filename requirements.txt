@@ -2,3 +2,5 @@ aiogram
 gspread
 oauth2client
 aiohttp
+apscheduler
+google-genai
