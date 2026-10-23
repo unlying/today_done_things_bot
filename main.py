@@ -63,7 +63,7 @@ async def send_summary(period_name: str, days: int, prompt_template: str):
     prompt = prompt_template.format(entries=entries_text)
     try:
         response = client_gemini.models.generate_content(
-            model="gemini-2.5-flash",
+            model="gemini-3.8-flash",
             contents=prompt,
         )
         summary_text = response.text
