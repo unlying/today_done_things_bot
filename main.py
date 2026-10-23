@@ -17,8 +17,10 @@ from oauth2client.service_account import ServiceAccountCredentials
 # --- Конфигурация ---
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
-# Ваш Telegram ID, чтобы бот знал, кому отправлять саммари (узнать можно у @userinfobot)
-YOUR_CHAT_ID = int(os.environ.get("196564651", 0)) 
+# Ваш Telegram ID. Можно задать через переменную окружения YOUR_CHAT_ID,
+# либо вписать число напрямую (как fallback).
+YOUR_CHAT_ID = int(os.environ.get("YOUR_CHAT_ID", "196564651"))
+
 CREDS_FILE = "/etc/secrets/credentials.json"
 if not os.path.exists(CREDS_FILE):
     CREDS_FILE = "credentials.json"
@@ -39,7 +41,7 @@ client_gemini = genai.Client(api_key=GEMINI_API_KEY)
 # Aiogram
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
-scheduler = AsyncIOScheduler(timezone="Europe/Moscow") # Укажите ваш часовой пояс
+scheduler = AsyncIOScheduler(timezone="Europe/Moscow")  # Укажите ваш часовой пояс
 
 # --- Вспомогательные функции ---
 def get_entries_for_period(days: int) -> list[str]:
@@ -47,11 +49,11 @@ def get_entries_for_period(days: int) -> list[str]:
     all_records = sheet.get_all_values()
     if not all_records or len(all_records) < 2:
         return []
-    
+
     # Пропускаем заголовок, формат: [Дата, Время, Текст]
     data_rows = all_records[1:]
     cutoff_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
-    
+
     entries = []
     for row in data_rows:
         if len(row) >= 3 and row[0] >= cutoff_date:
@@ -83,14 +85,20 @@ async def send_summary(period_name: str, days: int, prompt_template: str):
         await bot.send_message(YOUR_CHAT_ID, f"❌ Ошибка при создании саммари: {e}")
         return
 
-    await bot.send_message(YOUR_CHAT_ID, f"<b>📊 Саммари за {period_name}</b>\n\n{summary_text}", parse_mode="HTML")
+    await bot.send_message(
+        YOUR_CHAT_ID,
+        f"<b>📊 Саммари за {period_name}</b>\n\n{summary_text}",
+        parse_mode="HTML",
+    )
 
 # --- Запланированные задачи ---
 async def daily_summary_job():
+    logging.info("Запуск ежедневного саммари")
     prompt = "Сделай краткое саммари того, что было сделано сегодня, на русском языке. Записи:\n{entries}"
     await send_summary("сегодня", 1, prompt)
 
 async def weekly_summary_job():
+    logging.info("Запуск недельного саммари")
     prompt = """Ты — ассистент, который делает умное саммари по рабочему дневнику.
 Ниже — список того, что пользователь сделал за неделю.
 Твоя задача:
@@ -127,16 +135,17 @@ async def on_startup(bot: Bot):
     base_url = os.environ.get("RENDER_EXTERNAL_URL")
     if base_url:
         await bot.set_webhook(f"{base_url}{WEBHOOK_PATH}")
-    
-    # Запускаем планировщик
-    scheduler.add_job(daily_summary_job, "cron", hour=23, minute=0)
-    scheduler.add_job(weekly_summary_job, "cron", day_of_week="sun", hour=22, minute=0)
-    scheduler.start()
 
 async def health_check(request):
     return web.Response(text="Bot is alive")
 
 def main():
+    # Планировщик запускаем ДО web.run_app(), чтобы он стартовал
+    # при каждом «пробуждении» сервиса Render, а не только в on_startup.
+    scheduler.add_job(daily_summary_job, "cron", hour=23, minute=0)
+    scheduler.add_job(weekly_summary_job, "cron", day_of_week="sun", hour=22, minute=0)
+    scheduler.start()
+
     dp.startup.register(on_startup)
     app = web.Application()
     webhook_requests_handler = SimpleRequestHandler(dispatcher=dp, bot=bot)
