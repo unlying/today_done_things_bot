@@ -17,8 +17,6 @@ from oauth2client.service_account import ServiceAccountCredentials
 # --- Конфигурация ---
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
-# Ваш Telegram ID. Можно задать через переменную окружения YOUR_CHAT_ID,
-# либо вписать число напрямую (как fallback).
 YOUR_CHAT_ID = int(os.environ.get("YOUR_CHAT_ID", "196564651"))
 
 CREDS_FILE = "/etc/secrets/credentials.json"
@@ -29,31 +27,24 @@ WEBHOOK_PATH = "/webhook"
 PORT = int(os.environ.get("PORT", 8080))
 
 # --- Инициализация ---
-# Google Sheets
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 creds = ServiceAccountCredentials.from_json_keyfile_name(CREDS_FILE, scope)
 client_sheets = gspread.authorize(creds)
 sheet = client_sheets.open(SHEET_NAME).sheet1
 
-# Gemini
 client_gemini = genai.Client(api_key=GEMINI_API_KEY)
 
-# Aiogram
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
-scheduler = AsyncIOScheduler(timezone="Europe/Moscow")  # Укажите ваш часовой пояс
+scheduler = AsyncIOScheduler(timezone="Europe/Moscow")
 
-# --- Вспомогательные функции ---
+# --- Вспомогательные функции (без изменений) ---
 def get_entries_for_period(days: int) -> list[str]:
-    """Читает записи из Google Sheets за последние N дней."""
     all_records = sheet.get_all_values()
     if not all_records or len(all_records) < 2:
         return []
-
-    # Пропускаем заголовок, формат: [Дата, Время, Текст]
     data_rows = all_records[1:]
     cutoff_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
-
     entries = []
     for row in data_rows:
         if len(row) >= 3 and row[0] >= cutoff_date:
@@ -61,19 +52,15 @@ def get_entries_for_period(days: int) -> list[str]:
     return entries
 
 async def send_summary(period_name: str, days: int, prompt_template: str):
-    """Общая функция для генерации и отправки саммари."""
     if YOUR_CHAT_ID == 0:
         logging.warning("YOUR_CHAT_ID не установлен, саммари не отправлено.")
         return
-
     entries = get_entries_for_period(days)
     if not entries:
         await bot.send_message(YOUR_CHAT_ID, f"За {period_name} нет записей для саммари.")
         return
-
     entries_text = "\n".join(f"- {e}" for e in entries)
     prompt = prompt_template.format(entries=entries_text)
-
     try:
         response = client_gemini.models.generate_content(
             model="gemini-2.5-flash",
@@ -84,14 +71,12 @@ async def send_summary(period_name: str, days: int, prompt_template: str):
         logging.error(f"Ошибка Gemini: {e}")
         await bot.send_message(YOUR_CHAT_ID, f"❌ Ошибка при создании саммари: {e}")
         return
-
     await bot.send_message(
         YOUR_CHAT_ID,
         f"<b>📊 Саммари за {period_name}</b>\n\n{summary_text}",
         parse_mode="HTML",
     )
 
-# --- Запланированные задачи ---
 async def daily_summary_job():
     logging.info("Запуск ежедневного саммари")
     prompt = "Сделай краткое саммари того, что было сделано сегодня, на русском языке. Записи:\n{entries}"
@@ -130,7 +115,7 @@ async def log_handler(message: Message) -> None:
         logging.error(f"Ошибка: {e}")
         await message.answer("❌ Ошибка записи.")
 
-# --- Запуск (Webhook + Scheduler) ---
+# --- Startup ---
 async def on_startup(bot: Bot):
     base_url = os.environ.get("RENDER_EXTERNAL_URL")
     if base_url:
@@ -139,9 +124,9 @@ async def on_startup(bot: Bot):
 async def health_check(request):
     return web.Response(text="Bot is alive")
 
-def main():
-    # Планировщик запускаем ДО web.run_app(), чтобы он стартовал
-    # при каждом «пробуждении» сервиса Render, а не только в on_startup.
+# --- Ключевое изменение: запуск через asyncio.run() ---
+async def main():
+    # Планировщик запускается внутри event loop — ошибки не будет
     scheduler.add_job(daily_summary_job, "cron", hour=23, minute=0)
     scheduler.add_job(weekly_summary_job, "cron", day_of_week="sun", hour=22, minute=0)
     scheduler.start()
@@ -152,8 +137,17 @@ def main():
     webhook_requests_handler.register(app, path=WEBHOOK_PATH)
     app.router.add_get("/", health_check)
     setup_application(app, dp, bot=bot)
-    web.run_app(app, host="0.0.0.0", port=PORT)
+
+    # Запускаем веб-сервер внутри того же event loop
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", PORT)
+    await site.start()
+    logging.info(f"Server started on port {PORT}")
+    
+    # Держим event loop живым
+    await asyncio.Event().wait()
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
-    main()
+    asyncio.run(main())
